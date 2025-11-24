@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 
-# ----------------------------------------
-# Hilfsfunktion: Kombos über Backtracking
-# ----------------------------------------
+# ----------------------------------------------------
+# Efficient combination finder (NO sorting)
+# ----------------------------------------------------
 def find_combinations(df, value_cols, weight_cols, weight_factor, target_length):
     results = []
 
@@ -13,10 +13,12 @@ def find_combinations(df, value_cols, weight_cols, weight_factor, target_length)
             return
         if current_length == target_length:
             subset = df.loc[current_rows]
+
             unweighted_sum = subset[value_cols].sum().sum()
             weighted_sum = unweighted_sum
             if weight_cols:
                 weighted_sum += subset[weight_cols].sum().sum() * (weight_factor - 1)
+
             results.append({
                 "Indices": current_rows.copy(),
                 "Subset": subset,
@@ -34,75 +36,61 @@ def find_combinations(df, value_cols, weight_cols, weight_factor, target_length)
     return results
 
 
-# ----------------------------------------
-# Streamlit UI
-# ----------------------------------------
-st.title("Kombinations-Finder (Längen + Gewichtung)")
+# ----------------------------------------------------
+# Streamlit App
+# ----------------------------------------------------
+st.title("Combination Finder (Performance Optimized)")
 
-uploaded = st.file_uploader("Excel-Datei hochladen", type=["xlsx"])
+uploaded = st.file_uploader("Upload Excel File", type=["xlsx"])
 
 if uploaded:
     df = pd.read_excel(uploaded)
     df.columns = df.columns.str.replace("\r", "").str.replace("\n", "").str.strip()
 
-    st.success("Datei geladen!")
+    st.success("Excel loaded!")
 
-    # -------------------------
-    # Länge auswählen
-    # -------------------------
+    # Choose target length
     target_length = st.selectbox(
-        "Ziel-Länge auswählen",
+        "Select Target Length",
         [400, 200, 150, 100],
         index=1
     )
 
-    # Werte-Spalten erkennen
+    # Identify numeric columns
     value_cols = df.columns[2:]
 
-    # -------------------------
-    # Gewichtete Spalten wählen
-    # -------------------------
-    st.subheader("Spalten für Gewichtung auswählen")
-    weight_cols = st.multiselect(
-        "Spalten",
-        list(value_cols)
-    )
-
+    # Weighting controls
+    st.subheader("Optional Weighting")
+    weight_cols = st.multiselect("Select columns to weight", list(value_cols))
     weight_factor = st.number_input(
-        "Gewichtungsfaktor (z. B. 2 = doppelte Gewichtung)",
+        "Weight factor",
         min_value=1.0,
         max_value=10.0,
-        value=2.0,
+        value=1.0,
         step=0.1
     )
 
-    # Daten in numerisch umwandeln
+    # Clean numeric columns
     for col in value_cols:
         df[col] = pd.to_numeric(
             df[col].astype(str).str.replace(",", ".").str.strip(),
             errors="coerce"
         ).fillna(0)
 
-    # -------------------------
-    # RUN BUTTON
-    # -------------------------
-    if st.button("Berechnung starten"):
-        st.info("Berechnung läuft... kann bei vielen Rows dauern!")
+    # RUN button
+    if st.button("Run"):
+        st.info("Computing combinations... please wait.")
+        with st.spinner("Working..."):
 
-        results = find_combinations(df, value_cols, weight_cols, weight_factor, target_length)
+            results = find_combinations(df, value_cols, weight_cols, weight_factor, target_length)
 
         if not results:
-            st.error("Keine gültigen Kombinationen gefunden.")
+            st.error("No valid combinations found.")
         else:
-            st.success(f"{len(results)} Kombinationen gefunden!")
+            st.success(f"Found {len(results)} valid combinations!")
 
             # -------------------------
-            # Sortieren
-            # -------------------------
-            results.sort(key=lambda x: x["Weighted"], reverse=True)
-
-            # -------------------------
-            # Excel erzeugen
+            # Build Excel WITHOUT sorting
             # -------------------------
             output = BytesIO()
             with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
@@ -111,34 +99,25 @@ if uploaded:
 
                 for combo_id, r in enumerate(results, start=1):
                     subset = r["Subset"].copy()
-                    subset["Kombination"] = combo_id
+                    subset["Combination"] = combo_id
                     subset["Unweighted_Sum"] = r["Unweighted"]
                     unweighted_rows.append(subset)
 
                     subset2 = r["Subset"].copy()
-                    subset2["Kombination"] = combo_id
+                    subset2["Combination"] = combo_id
                     subset2["Weighted_Sum"] = r["Weighted"]
                     weighted_rows.append(subset2)
 
-                unweighted_df = pd.concat(unweighted_rows)
-                unweighted_df = unweighted_df.sort_values("Unweighted_Sum", ascending=False)
-                unweighted_df.to_excel(writer, sheet_name="Unweighted", index=False)
+                pd.concat(unweighted_rows).to_excel(writer, sheet_name="Unweighted", index=False)
+                pd.concat(weighted_rows).to_excel(writer, sheet_name="Weighted", index=False)
 
-                weighted_df = pd.concat(weighted_rows)
-                weighted_df = weighted_df.sort_values("Weighted_Sum", ascending=False)
-                weighted_df.to_excel(writer, sheet_name="Weighted", index=False)
-            # -------------------------
-            # Download
-            # -------------------------
+            # Download button
             st.download_button(
-                label="Ergebnis als Excel herunterladen",
-                data=output.getvalue(),
-                file_name="kombinationen.xlsx",
+                "Download Excel Results",
+                output.getvalue(),
+                file_name="results.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-            st.success("Excel bereit!")
-
-
 else:
-    st.info("Bitte eine Excel-Datei hochladen.")
+    st.info("Please upload an Excel file.")
